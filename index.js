@@ -1,87 +1,47 @@
 require('dotenv').config();
+const express = require('express');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-const readline = require('readline'); // Interface de usuário
-const PDFDocument = require('pdfkit'); // Gerador de PDF
-const fs = require('fs'); // Sistema de arquivos
+const PDFDocument = require('pdfkit');
+const fs = require('fs');
+const path = require('path');
 
-// 1. Configuração da IA
+const app = express();
+app.use(express.json());
+app.use(express.static('public')); // Serve o arquivo HTML
+
+// Configuração IA (Corrigi para gemini-1.5-flash que é estável)
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-// Usando modelo estável para evitar erro 404
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-// 2. Configuração da Interface de Chat (Terminal)
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
+// Rota para processar a pergunta
+app.post('/perguntar', async (req, res) => {
+    const { pergunta } = req.body;
+
+    try {
+        const promptFinal = `Você é um pirata dos sete mares. Responda de forma técnica, mas com gírias de pirata: ${pergunta}`;
+        const result = await model.generateContent(promptFinal);
+        const resposta = result.response.text();
+
+        // Gerar ID único para o PDF
+        const id = Date.now();
+        const nomeArquivo = `resposta_${id}.pdf`;
+        const caminhoPDF = path.join(__dirname, 'public', nomeArquivo);
+
+        // Criar o PDF
+        const doc = new PDFDocument();
+        doc.pipe(fs.createWriteStream(caminhoPDF));
+        doc.fontSize(20).text("📜 DIÁRIO DO CAPITÃO GEMINI", { align: 'center' });
+        doc.moveDown().fontSize(14).text(`Pergunta: ${pergunta}`);
+        doc.moveDown().text(`Resposta: ${resposta}`);
+        doc.end();
+
+        res.json({ resposta, pdfUrl: nomeArquivo });
+
+    } catch (erro) {
+        res.status(500).json({ erro: erro.message });
+    }
 });
 
-// 3. Função para Criar o PDF
-function gerarPDF(pergunta, resposta, id) {
-    const nomeArquivo = `resposta_pirata_${id}.pdf`;
-    const doc = new PDFDocument();
-
-    doc.pipe(fs.createWriteStream(nomeArquivo));
-
-    // Estilização do PDF
-    doc.fontSize(20).text("📜 DIÁRIO DE BORDO DO CAPITÃO GEMINI", { align: 'center' });
-    doc.moveDown();
-    doc.fontSize(14).font('Helvetica-Bold').text("Pergunta do Marujo:");
-    doc.fontSize(12).font('Helvetica').text(pergunta);
-    doc.moveDown();
-    doc.fontSize(14).font('Helvetica-Bold').text("Resposta da IA:");
-    doc.fontSize(12).font('Helvetica').text(resposta);
-    doc.moveDown();
-    doc.fontSize(10).text(`Gerado em: ${new Date().toLocaleString()}`, { align: 'right' });
-
-    doc.end();
-    return nomeArquivo;
-}
-
-// 4. Função Principal (O Chat)
-async function iniciarChat() {
-    console.log("\n================================================");
-    console.log("🏴‍☠️ BEM-VINDO AO NAVIO DO CAPITÃO GEMINI!");
-    console.log("   (Digite sua pergunta ou 'sair' para fugir)");
-    console.log("================================================\n");
-
-    let contador = 1;
-
-    const perguntar = () => {
-        rl.question("👤 Marujo diz: ", async (input) => {
-            if (input.toLowerCase() === 'sair') {
-                console.log("\n🦜 Arrr! Até a próxima, terra à vista!");
-                rl.close();
-                return;
-            }
-
-            try {
-                process.stdout.write("🤖 O Capitão está escrevendo com a pena... ");
-
-                // Engenharia de Prompt (Persona Pirata aplicada a qualquer pergunta)
-                const promptFinal = `Você é um pirata dos sete mares. Responda à seguinte pergunta de forma técnica, mas usando muitas gírias de pirata: ${input}`;
-
-                const result = await model.generateContent(promptFinal);
-                const resposta = result.response.text();
-
-                // Limpa o aviso de "escrevendo" e mostra a resposta
-                readline.cursorTo(process.stdout, 0);
-                console.log(`\n\n🤖 [CAPITÃO]:\n${resposta}\n`);
-
-                // Gera o PDF
-                const pdfCriado = gerarPDF(input, resposta, contador);
-                console.log(`✅ Documento selado e guardado: ${pdfCriado}\n`);
-                
-                contador++;
-
-            } catch (erro) {
-                console.error("\n❌ Tempestade à vista! Erro:", erro.message);
-            }
-
-            perguntar(); // Volta a perguntar
-        });
-    };
-
-    perguntar();
-}
-
-iniciarChat();
+app.listen(3000, () => {
+    console.log("🏴‍☠️ Navio ancorado em http://localhost:3000");
+});
